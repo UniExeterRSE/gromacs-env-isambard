@@ -37,7 +37,7 @@ set -uo pipefail
 cd "${SLURM_SUBMIT_DIR:-$(pwd)}" || exit 1
 
 export GROMACS_PREFIX="${GROMACS_PREFIX:-$PROJECTDIR/$USER/opt/$(uname -sm | tr ' ' -)}"
-VARIANTS="${GROMACS_BENCH_VARIANTS:-cray-sve spack-sve cray-neon}"
+VARIANTS="${GROMACS_BENCH_VARIANTS:-cray-neon cray-sve spack-sve}"
 NSTEPS="${GROMACS_BENCH_NSTEPS:-12000}"
 BOX="${GROMACS_BENCH_BOX:-12.0}"
 

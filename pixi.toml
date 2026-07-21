@@ -31,6 +31,7 @@ scripts = ["scripts/common.sh", "scripts/activate.sh"]
 submodule-init = "git submodule update --init --recursive --jobs 4"
 
 # Concretize ONLY — the dependency solve plus the variant assertions, then stop.
+# (Default variant is cray-neon; see MAINTAINER.md "Tuning" for why neon.)
 # The cheap, login-node-safe check that a manifest change still solves (no
 # multi-hour install). Idempotent: a no-op when the lock already matches the
 # manifest; set FORCE_CONCRETIZE=1 to force a fresh re-solve. `build` and `fetch`
@@ -51,7 +52,7 @@ fetch-spack = "GROMACS_STACK=spack bash scripts/fetch.sh"
 # prefix any task, e.g. `GROMACS_SIMD=neon pixi run build`.
 build = "bash scripts/build.sh"
 build-spack = "GROMACS_STACK=spack bash scripts/build.sh"
-build-neon = "GROMACS_SIMD=neon bash scripts/build.sh"
+build-sve = "GROMACS_SIMD=sve bash scripts/build.sh"
 
 # Regenerate just the Lmod modulefile from an already-installed environment (for
 # a modulefile fix, without a rebuild). For the cray variant, run it with the

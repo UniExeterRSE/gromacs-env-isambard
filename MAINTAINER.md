@@ -105,7 +105,57 @@ is therefore an empirical question on this hardware, not a foregone conclusion �
 which is why `neon` is a first-class variant and `tests/benchmark.sbatch`
 measures it rather than this document asserting it.
 
-<!-- BENCHMARK RESULTS: filled in from tests/benchmark.sbatch -->
+**Measured answer: NEON wins, clearly.** `tests/benchmark.sbatch`, ~170k-atom
+SPC/E water, PME, `-notunepme`, best of 2 repeats, ns/day:
+
+| variant | 1 node, 24×6 | 1 node, 36×4 | 1 node, 72×2 | 2 nodes, 48×6 | 2 nodes, 72×4 | 2 nodes, 144×2 |
+|---|---|---|---|---|---|---|
+| **cray-neon** | 105.6 | **106.1** | 104.1 | 150.4 | 149.9 | **181.7** |
+| cray-sve  | 90.6 | 90.9 | 89.2 | 147.2 | 147.9 | 161.6 |
+| spack-sve | 90.1 | 90.5 | 89.4 | 137.5 | 132.6 | 161.1 |
+
+NEON is **+17% on one node** and **+12% on two** over the identical build with
+SVE, at every geometry, with repeat-to-repeat spread under 0.5%. That is why
+`GROMACS_SIMD` defaults to `neon` here — **inverting the Spack package's own
+`+sve` default**, deliberately and on evidence.
+
+The result is not surprising once stated: Grace implements SVE2 and NEON on the
+*same* four 128-bit pipelines, so SVE brings predication and gather/scatter but
+no extra width, and GROMACS' non-bonded kernels are hand-tuned fixed-width code
+that gains nothing from predication while paying for it. On a 256-bit SVE machine
+(Neoverse-V1) the answer would very likely flip — which is exactly why this is a
+variant and a benchmark rather than a hard-coded choice.
+
+**cray vs spack is a tie at the optimum, and a cray win everywhere else.** At the
+best geometry (2 nodes, 144×2) the two stacks are within 0.4% — a from-source
+MPICH on the CXI provider matches cray-mpich when the decomposition suits it. But
+at 48×6 and 72×4 on two nodes, cray-mpich leads by 7% and 12%, and on one node
+they are identical (0.4%). So the difference is entirely in **multi-node
+communication**, which is what you would expect, and cray-mpich is the more
+forgiving choice when the geometry is not optimal. `cray` stays the default
+stack; `spack` is a genuinely usable fallback, not a toy.
+
+**Ranks × threads matters more than either.** Going from 48×6 to 144×2 on two
+nodes is worth +21% on cray-neon — larger than the SIMD choice and much larger
+than the MPI choice. Note the ordering *inverts* between one node (more OpenMP
+slightly better) and two (many more ranks clearly better), so single-node tuning
+does not transfer. See the README section on this.
+
+**On reading that table.** The three benchmarked variants are a deliberate
+two-factor design, not an arbitrary set: each comparison holds the other factor
+fixed.
+
+- `cray-neon` vs `cray-sve` — isolates **SIMD** (same MPI, same FFT).
+- `cray-sve` vs `spack-sve` — isolates **MPI + FFT** (same SIMD).
+
+That is why the default benchmark set is those three and not all four
+combinations: a fourth (`spack-neon`) adds a redundant cell and pushes the matrix
+past the job's time budget. `spack-neon` *is* built and tested — it is what
+`GROMACS_STACK=spack` now produces — it is simply not needed to answer either
+question. Add it with `GROMACS_BENCH_VARIANTS` if you want the full grid.
+
+To re-measure after any change: `sbatch tests/benchmark.sbatch` (2 exclusive
+nodes, ~50 min).
 
 ### The rank × thread question
 

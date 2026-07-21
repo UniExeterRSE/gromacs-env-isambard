@@ -8,9 +8,9 @@
 #SBATCH --output=logs/build-%j.out
 #
 # Build one GROMACS variant on a Grace compute node. Run from the repo root:
-#   sbatch scripts/build.sbatch                                    # cray-sve  (default)
-#   sbatch --export=ALL,GROMACS_STACK=spack scripts/build.sbatch   # spack-sve
-#   sbatch --export=ALL,GROMACS_SIMD=neon scripts/build.sbatch     # cray-neon
+#   sbatch scripts/build.sbatch                                    # cray-neon (default)
+#   sbatch --export=ALL,GROMACS_STACK=spack scripts/build.sbatch   # spack-neon
+#   sbatch --export=ALL,GROMACS_SIMD=sve scripts/build.sbatch      # cray-sve
 #
 # Why a compute node: the login nodes cap user processes (ulimit -u 1900), which
 # a full parallel build can exhaust. Why these resources: grace allocates memory
@@ -28,7 +28,7 @@ cd "${SLURM_SUBMIT_DIR:-$(pwd)}" || exit 1
 
 # ---- Configuration: everything this build needs, set explicitly -----------
 export GROMACS_STACK="${GROMACS_STACK:-cray}"   # cray | spack
-export GROMACS_SIMD="${GROMACS_SIMD:-sve}"      # sve  | neon
+export GROMACS_SIMD="${GROMACS_SIMD:-neon}"     # neon | sve
 # BASE: the per-arch container, shared across env versions (Lustre; survives the
 # job). common.sh installs into the VERSIONED prefix $GROMACS_PREFIX/<version>,
 # with the version read from ./VERSION.

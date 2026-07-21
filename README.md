@@ -56,14 +56,19 @@ than the first.
 |------|-------|---------|
 | `GROMACS_STACK` | `cray` *(default)* | system **cray-mpich** + system **cray-fftw** (Grace-tuned HPE builds) |
 | | `spack` | **mpich** + **fftw** built from source; portability / comparison |
-| `GROMACS_SIMD` | `sve` *(default)* | `GMX_SIMD=ARM_SVE`, 128-bit (Grace's SVE vector length) |
-| | `neon` | `GMX_SIMD=ARM_NEON_ASIMD`, the fixed-128-bit alternative |
+| `GROMACS_SIMD` | `neon` *(default)* | `GMX_SIMD=ARM_NEON_ASIMD` |
+| | `sve` | `GMX_SIMD=ARM_SVE`, 128-bit (Grace's SVE vector length) |
 
-The SIMD axis exists because it is a genuinely open question on this hardware:
-Neoverse-V2 implements SVE2 and NEON on the *same* four 128-bit pipelines, so SVE
-buys predication and gather/scatter but no extra width. `tests/benchmark.sbatch`
-answers it for your system rather than guessing — see
-[MAINTAINER.md](MAINTAINER.md#tuning) for the measured result.
+**`neon` is the default because it measured faster** — 17% on one node, 12% on
+two, at every geometry tested. Neoverse-V2 implements SVE2 and NEON on the *same*
+four 128-bit pipelines, so SVE brings predication and gather/scatter but no extra
+width, and GROMACS' hand-tuned fixed-width kernels do not benefit. This inverts
+the Spack package's own `+sve` default, deliberately and on evidence; on a
+256-bit SVE machine the answer would likely flip. See
+[MAINTAINER.md](MAINTAINER.md#tuning) for the full table.
+
+The default stack stays `cray`: at the best geometry the two stacks tie to within
+0.4%, but cray-mpich leads by 7-12% at the other multi-node geometries.
 
 ## Prerequisites
 
@@ -86,9 +91,9 @@ git submodule update --init --recursive --jobs 4
 
 # 2. Build on a compute node, one variant at a time.
 #    The config block at the top of scripts/build.sbatch sets WHERE things go.
-sbatch scripts/build.sbatch                                    # cray-sve (default)
-sbatch --export=ALL,GROMACS_STACK=spack scripts/build.sbatch   # spack-sve
-sbatch --export=ALL,GROMACS_SIMD=neon scripts/build.sbatch     # cray-neon
+sbatch scripts/build.sbatch                                    # cray-neon (default)
+sbatch --export=ALL,GROMACS_STACK=spack scripts/build.sbatch   # spack-neon
+sbatch --export=ALL,GROMACS_SIMD=sve scripts/build.sbatch      # cray-sve
 ```
 
 Each job writes its log to `logs/build-<jobid>.out`; a successful run ends with
@@ -114,8 +119,8 @@ repo's `VERSION` file), which is **outside the repo** — see
 To do the network I/O up front and make the compute-node build offline-safe:
 
 ```bash
-bash scripts/fetch.sh                             # cray-sve
-GROMACS_STACK=spack bash scripts/fetch.sh         # spack-sve
+bash scripts/fetch.sh                             # cray-neon
+GROMACS_STACK=spack bash scripts/fetch.sh         # spack-neon
 ```
 
 Needs a Python in [3.7, 3.12) — `module load cray-python/3.11.7`, or use pixi.
@@ -136,13 +141,13 @@ export GROMACS_PREFIX="$PROJECTDIR/$USER/opt/$(uname -sm | tr ' ' -)"
 
 module use "$GROMACS_PREFIX/modulefiles"
 module avail gromacs-env                       # every built version x variant
-module load gromacs-env/v2026.07.21/cray-sve   # or .../spack-sve, .../cray-neon
+module load gromacs-env/v2026.07.21/cray-neon  # or .../spack-neon, .../cray-sve
 
 gmx -version          # the definitive record of how this build was configured
 ```
 
 A bare `module load gromacs-env` resolves to the most-recently-built version's
-`cray-sve`; `module load gromacs-env/<version>` to that version's `cray-sve`.
+`cray-neon`; `module load gromacs-env/<version>` to that version's `cray-neon`.
 
 ### Single node
 
@@ -156,13 +161,14 @@ gmx mdrun -s run.tpr -ntmpi 24 -ntomp 6 -pin on
 ### Multiple nodes
 
 Use `gmx_mpi` under `$GROMACS_MPI_LAUNCHER`, which the module sets to whatever
-this variant's MPI actually needs (`srun` for cray-mpich, `srun --mpi=pmi2` for
+this variant's MPI actually needs (`srun` for cray-mpich, `srun --mpi=pmix` for
 the from-source mpich). Do not hard-code `srun` — that is the one thing that
 differs between the two stacks.
 
 ```bash
-#SBATCH --nodes=2 --ntasks-per-node=24 --cpus-per-task=6
-module load gromacs-env/v2026.07.21/cray-sve
+# 72 ranks x 2 threads per node measured fastest on 2 nodes -- see below.
+#SBATCH --nodes=2 --ntasks-per-node=72 --cpus-per-task=2
+module load gromacs-env/v2026.07.21/cray-neon
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 $GROMACS_MPI_LAUNCHER -c $SLURM_CPUS_PER_TASK --cpu-bind=cores \
@@ -171,9 +177,24 @@ $GROMACS_MPI_LAUNCHER -c $SLURM_CPUS_PER_TASK --cpu-bind=cores \
 
 **Ranks × threads.** A Grace node is 144 cores in 2 NUMA domains of 72. Keep
 `ranks_per_node × OMP_NUM_THREADS == 144` and make the threads-per-rank a divisor
-of 72 so no rank straddles a NUMA domain. `24 × 6` is a good default; the
-benchmark measures `24×6`, `36×4` and `72×2` so you can pick from data. Let Slurm
-bind (`-c $OMP --cpu-bind=cores`) and let GROMACS pin inside that mask
+of 72 so no rank straddles a NUMA domain.
+
+The best ratio **depends on how many nodes you are on**, which is why the
+benchmark measures `24×6`, `36×4` and `72×2` rather than this document asserting
+one. On the ~170k-atom test case:
+
+- **1 node** — `24×6` and `36×4` are equivalent (within 0.5%); `72×2` is ~2%
+  slower.
+- **2 nodes** — the ordering *inverts*, and by a lot: `72×2` per node (144 ranks
+  total) is **~21% faster** than `48×6`, because with more ranks GROMACS can give
+  PME its own separate ranks and overlap the reciprocal-space work.
+
+That +21% is larger than the SIMD choice and much larger than the MPI choice, so
+it is the first thing to tune — and single-node tuning does not transfer. Run
+`tests/benchmark.sbatch` for your own system size; the crossover depends on
+atoms-per-rank, not just on the machine.
+
+Let Slurm bind (`-c $OMP --cpu-bind=cores`) and let GROMACS pin inside that mask
 (`-pin on`) — using neither, or both without the mask, is the usual cause of a
 mysteriously slow run.
 
@@ -187,9 +208,9 @@ simulation is generated from data that ships inside GROMACS itself (a solvated
 SPC/E water box, PME + LINCS, ~172k atoms).
 
 ```bash
-sbatch tests/smoke.sbatch                                    # cray-sve
-sbatch --export=ALL,GROMACS_STACK=spack tests/smoke.sbatch   # spack-sve
-sbatch --export=ALL,GROMACS_SIMD=neon tests/smoke.sbatch     # cray-neon
+sbatch tests/smoke.sbatch                                    # cray-neon
+sbatch --export=ALL,GROMACS_STACK=spack tests/smoke.sbatch   # spack-neon
+sbatch --export=ALL,GROMACS_SIMD=sve tests/smoke.sbatch      # cray-sve
 ```
 
 2 nodes for well under 20 minutes. A successful run ends with `SMOKE_OK`. It
@@ -220,11 +241,11 @@ module on every `pixi run`. Nothing here is required.
 
 ```bash
 pixi run submodule-init      # = the git submodule update above
-pixi run concretize          # = scripts/concretize.sh (cray-sve)
+pixi run concretize          # = scripts/concretize.sh (cray-neon)
 pixi run fetch               # = scripts/fetch.sh — pre-fetch on a login node
 pixi run build               # = scripts/build.sh — run on a compute node
-pixi run build-spack         # = the spack-sve variant
-pixi run build-neon          # = the cray-neon variant
+pixi run build-spack         # = the spack-neon variant
+pixi run build-sve           # = the cray-sve variant
 pixi run versions            # report the built configuration (gmx -version)
 pixi run smoke               # = sbatch tests/smoke.sbatch
 pixi run benchmark           # = sbatch tests/benchmark.sbatch
@@ -244,7 +265,7 @@ scripts set them explicitly in a config block at the top.
 | Variable | Default | What it controls |
 |----------|---------|------------------|
 | `GROMACS_STACK` | `cray` | MPI + FFT provider: `cray` or `spack`. |
-| `GROMACS_SIMD` | `sve` | SIMD kernel: `sve` or `neon`. |
+| `GROMACS_SIMD` | `neon` | SIMD kernel: `neon` or `sve`. |
 | `GROMACS_ENV_VERSION` | contents of `./VERSION` | **Environment version** (CalVer). Selects the install prefix `$GROMACS_PREFIX/<version>` and the module name. Bump it with `bash scripts/bump-env-version.sh`. Distinct from the GROMACS version, which is pinned in `spack-env/common.yaml`. |
 | `GROMACS_PREFIX` | `$PROJECTDIR/$USER/opt/<arch>` | **Base** install location, shared across versions. The install goes to `$GROMACS_PREFIX/$GROMACS_ENV_VERSION`; the modulefiles tree and download caches sit at the base and are version-independent. Outside the repo. |
 | `GROMACS_WORKING_DIR` | `$PREFIX/stage` | **Transient** Spack build scratch. The sbatch points this at node-local NVMe (`$LOCALDIR/…`) to keep the build off shared Lustre. Safe to delete anytime. |

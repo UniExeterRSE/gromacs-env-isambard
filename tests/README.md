@@ -11,9 +11,9 @@ depends on a third-party host being reachable from a compute node.
 
 ```bash
 # from the repo root
-sbatch tests/smoke.sbatch                                    # cray-sve (default)
-sbatch --export=ALL,GROMACS_STACK=spack tests/smoke.sbatch   # spack-sve
-sbatch --export=ALL,GROMACS_SIMD=neon  tests/smoke.sbatch    # cray-neon
+sbatch tests/smoke.sbatch                                    # cray-neon (default)
+sbatch --export=ALL,GROMACS_STACK=spack tests/smoke.sbatch   # spack-neon
+sbatch --export=ALL,GROMACS_SIMD=sve   tests/smoke.sbatch    # cray-sve
 
 sbatch tests/benchmark.sbatch                                # all built variants
 ```

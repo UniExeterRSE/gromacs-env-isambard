@@ -76,13 +76,19 @@ export GROMACS_MISC_CACHE="${GROMACS_MISC_CACHE:-$BASE/misc-cache}"
 # --- Build variant: <stack>-<simd> -----------------------------------------
 # GROMACS_STACK  cray  - system cray-mpich + system cray-fftw (externals) [default]
 #                spack - mpich + fftw built from source (portable fallback)
-# GROMACS_SIMD   sve   - GMX_SIMD=ARM_SVE (128-bit on Grace)              [default]
-#                neon  - GMX_SIMD=ARM_NEON_ASIMD (the fixed-128-bit alternative)
+# GROMACS_SIMD   neon  - GMX_SIMD=ARM_NEON_ASIMD                             [default]
+#                sve   - GMX_SIMD=ARM_SVE (128-bit on Grace)
+# neon is the default because it MEASURED faster on this hardware: 12-17% ahead
+# of SVE across every geometry benchmarked (see MAINTAINER.md "Tuning"). Grace
+# implements SVE2 and NEON on the same four 128-bit pipelines, so SVE brings
+# predication and gather/scatter but no extra width, and for GROMACS' non-bonded
+# kernels that trade does not pay. Note this inverts the Spack package's own
+# default (+sve).
 # These are two orthogonal axes; together they name the variant, the Spack
 # environment directory and the modulefile. All variants share $PREFIX/opt.
 # lib.sh validates both values; kept default-only here to stay side-effect-light.
 export GROMACS_STACK="${GROMACS_STACK:-cray}"
-export GROMACS_SIMD="${GROMACS_SIMD:-sve}"
+export GROMACS_SIMD="${GROMACS_SIMD:-neon}"
 export VARIANT="$GROMACS_STACK-$GROMACS_SIMD"
 # The Spack directory environment is GENERATED under PREFIX (so its lockfile
 # lands outside the repo). The tracked spack-env/<stack>/spack.yaml is
