@@ -102,5 +102,10 @@ gmx solvate -cs spc216.gro -box "$box" "$box" "$box" -o conf.gro -p topol.top
 echo "== grompp"
 gmx grompp -f grompp.mdp -c conf.gro -p topol.top -o bench.tpr -maxwarn 1
 
-natoms="$(gmx dump -s bench.tpr 2>/dev/null | grep -m1 -E '^ *natoms' | tr -dc '0-9')"
+# Atom count straight from the .gro header (line 2 is the atom count, by format).
+# Deliberately NOT `gmx dump -s bench.tpr | grep -m1 natoms`: under `set -o
+# pipefail` that reports failure even on success, because `grep -m1` exits after
+# the first match and `gmx dump` then dies of SIGPIPE. Reading the file cannot
+# fail, and needs no second GROMACS invocation.
+natoms="$(sed -n '2p' conf.gro | tr -dc '0-9')"
 echo "CASE_OK  tpr=$PWD/bench.tpr  atoms=${natoms:-?}  nsteps=$nsteps"

@@ -2,6 +2,8 @@
 #SBATCH --job-name=gromacs-bench
 #SBATCH --partition=grace
 #SBATCH --nodes=2
+#SBATCH --ntasks-per-node=144
+#SBATCH --cpus-per-task=1
 #SBATCH --exclusive
 #SBATCH --time=00:40:00
 #SBATCH --output=logs/bench-%j.out
@@ -11,6 +13,13 @@
 #
 # --exclusive matters here and only here: a benchmark that shares its nodes
 # measures the neighbours as much as GROMACS. The smoke test does not need it.
+#
+# The allocation claims all 144 cores/node as 144 single-CPU task slots. That is
+# NOT the geometry anything runs at — every `srun` below re-slices it as
+# `-n <ranks> -c <omp>`. It is here because an allocation that only says
+# `--exclusive` defaults to one task per node, and srun then refuses the larger
+# rank counts in the matrix. Requesting the slots up front lets one allocation
+# serve every geometry from 24x6 to 72x2.
 #
 # Budget: 2 nodes, well under 40 minutes. Each individual mdrun is ~30-60 s; the
 # matrix is (variants) x (1,2 nodes) x (3 rank/thread ratios) x (repeats).
