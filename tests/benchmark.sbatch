@@ -5,7 +5,7 @@
 #SBATCH --ntasks-per-node=144
 #SBATCH --cpus-per-task=1
 #SBATCH --exclusive
-#SBATCH --time=00:40:00
+#SBATCH --time=01:15:00
 #SBATCH --output=logs/bench-%j.out
 #
 # Compare the built variants on identical work. Run from the repo root:
@@ -21,8 +21,13 @@
 # rank counts in the matrix. Requesting the slots up front lets one allocation
 # serve every geometry from 24x6 to 72x2.
 #
-# Budget: 2 nodes, well under 40 minutes. Each individual mdrun is ~30-60 s; the
-# matrix is (variants) x (1,2 nodes) x (3 rank/thread ratios) x (repeats).
+# Budget: 2 nodes, ~50 minutes of the 1h15 requested. Measured on this system, a
+# matrix run costs ~95 s wall — the MD itself is ~15-20 s and the rest is MPI
+# startup, tpr read and DD setup, which no amount of shortening the run avoids.
+# The matrix is (3 variants) x (1,2 nodes) x (3 rank/thread ratios) x (2 repeats)
+# = 36 runs. Trim GROMACS_BENCH_REPEATS to 1 if you need it to fit in less;
+# repeat-to-repeat spread measured here is under 0.5%, so the second repeat is
+# confirmation rather than statistics.
 #
 # All variants run against ONE tpr generated once, so the only thing differing
 # between rows is the build.
@@ -33,7 +38,7 @@ cd "${SLURM_SUBMIT_DIR:-$(pwd)}" || exit 1
 
 export GROMACS_PREFIX="${GROMACS_PREFIX:-$PROJECTDIR/$USER/opt/$(uname -sm | tr ' ' -)}"
 VARIANTS="${GROMACS_BENCH_VARIANTS:-cray-sve spack-sve cray-neon}"
-NSTEPS="${GROMACS_BENCH_NSTEPS:-20000}"
+NSTEPS="${GROMACS_BENCH_NSTEPS:-12000}"
 BOX="${GROMACS_BENCH_BOX:-12.0}"
 
 results="logs/bench-${SLURM_JOB_ID:-manual}.tsv"
