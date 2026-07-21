@@ -1,0 +1,106 @@
+# Shared configuration included by every variant manifest
+# (spack-env/<stack>/spack.yaml). It holds everything identical across the
+# cray / spack dependency stacks: the package repos, the gcc@14.3.0 system
+# external, the CPU target pin, and the GROMACS build options themselves.
+#
+# What differs BETWEEN stacks (and therefore lives in each stack's spack.yaml)
+# is only the MPI provider and the FFT provider:
+#   - spack-env/cray/spack.yaml   system cray-mpich + system cray-fftw
+#   - spack-env/spack/spack.yaml  mpich + fftw built from source
+#
+# The third axis (SIMD: ARM_SVE vs ARM_NEON_ASIMD) is NOT here: it is written
+# per build into $SPACK_ENV_DIR/simd.yaml by scripts/lib.sh from GROMACS_SIMD,
+# and included by each stack manifest. See MAINTAINER.md.
+#
+# Relative paths below resolve against THIS file's directory (spack-env/), not
+# the including manifest's directory, so `../vendor` is correct from each
+# nested stack dir.
+#
+# NOTE: view: and specs: are environment-manifest-only keys and cannot live in
+# an included config scope, so each stack's spack.yaml carries its own.
+concretizer:
+  unify: when_possible
+repos:
+  builtin: ../vendor/spack-packages/repos/spack_repo/builtin
+packages:
+  all:
+    # The "-march=native" equivalent. Isambard 3 login and grace compute nodes
+    # are both NVIDIA Grace (Neoverse-V2), so a native solve would pick this
+    # anyway — pinning it makes the solve deterministic and independent of where
+    # concretization happens. Spack's compiler wrapper turns this into
+    # `-mcpu=neoverse-v2` for gcc, which is what -march/-mtune=native would
+    # resolve to here. GROMACS then layers its own SIMD flags on top
+    # (-march=armv8.2-a+sve -msve-vector-bits=128); both are asserted after the
+    # build by scripts/lib.sh (gmx -version reports the exact flags used).
+    require:
+    - target=neoverse_v2
+    providers:
+      blas: [openblas]
+      lapack: [openblas]
+  # Compiler. gcc@14.3.0 is the newest complete C/C++/Fortran toolchain on the
+  # system (/usr/bin/{gcc,g++,gfortran}-14, vanilla GNU, present on both login
+  # and grace nodes) and comfortably clears GROMACS' "for maximum performance on
+  # NVIDIA Grace we strongly suggest at least GNU >= 13". Declared as an explicit
+  # external and pinned for the whole environment so the solve never drifts to
+  # another gcc that `spack compiler find` might register.
+  gcc:
+    externals:
+    - spec: gcc@14.3.0 languages:='c,c++,fortran'
+      prefix: /usr
+      extra_attributes:
+        compilers:
+          c: /usr/bin/gcc-14
+          cxx: /usr/bin/g++-14
+          fortran: /usr/bin/gfortran-14
+    require: ['@14.3.0']
+  # Per-language virtual requires (the "%compiler" form in "all: require"
+  # triggers an internal concretizer error in Spack 1.0).
+  c:
+    require: ['gcc@14.3.0']
+  cxx:
+    require: ['gcc@14.3.0']
+  fortran:
+    require: ['gcc@14.3.0']
+  gcc-runtime:
+    require: ['@14.3.0']
+
+  # --- The GROMACS build itself -------------------------------------------
+  # Toggles, and why each is set the way it is (the "what should I turn on?"
+  # question — see MAINTAINER.md "Tuning" for the full reasoning):
+  #
+  #   ~cuda ~opencl ~sycl   Isambard 3 grace nodes have NO GPU.
+  #   +openmp               essential: GROMACS wants a few OpenMP threads per
+  #                         rank, not one rank per core, on a 144-core node.
+  #   +hwloc                topology-aware thread pinning. Matters here: 2 NUMA
+  #                         domains per node, and GROMACS pins by default.
+  #   +shared               dynamic libgromacs. A fully static gmx is not
+  #                         achievable anyway (cray-mpich/libfabric ship .so
+  #                         only), so the modulefile is the delivery mechanism.
+  #   build_type=Release    -O3 -DNDEBUG. RelWithAssert/Debug cost a lot here.
+  #   ~double               mixed precision — the standard, and ~2x faster.
+  #                         (Add a `gromacs +double` spec if you ever need it.)
+  #   ~cp2k                 not requested; would drag in a whole CP2K build.
+  #                         (~plumed is NOT listed: GROMACS 2026.1 has no plumed
+  #                         variant at all, so requiring it fails the solve.)
+  #
+  # The SIMD toggle (+sve / ~sve) is deliberately NOT pinned here — it is the
+  # benchmarked axis, set per build in the generated simd.yaml.
+  gromacs:
+    require:
+    - '@2026.1'
+    - '~cuda ~opencl ~sycl ~cp2k ~double'
+    - '+openmp +hwloc +shared'
+    - 'build_type=Release'
+  # BLAS/LAPACK are used by a handful of GROMACS analysis tools (normal-mode
+  # analysis, covariance) and essentially never by mdrun's inner loops, so this
+  # is a correctness-not-performance dependency. Deliberately the SAME
+  # from-source openblas in BOTH stacks: it keeps the cray-vs-spack benchmark an
+  # apples-to-apples comparison of exactly two things, MPI and FFT.
+  # threads=none on purpose: GROMACS does its own thread management and pinning,
+  # so a threaded BLAS underneath would oversubscribe the cores it has pinned.
+  openblas:
+    require: ['+fortran threads=none']
+  # ~libxml2 keeps a whole libxml2/python subtree out of the solve; hwloc's XML
+  # topology import/export is not used here (GROMACS only queries live topology).
+  hwloc:
+    require: ['~libxml2']

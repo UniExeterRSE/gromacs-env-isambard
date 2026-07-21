@@ -1,0 +1,82 @@
+# GROMACS environment — "cray" stack: use the system Cray PE libraries.
+# MPI is the system cray-mpich and the FFT library is the system cray-fftw
+# (arm_grace build), both declared as Spack externals (buildable: false).
+# Selected by GROMACS_STACK=cray (the default); scripts/lib.sh loads PrgEnv-gnu
+# + craype-arm-grace + brics/cray-fftw so these prefixes resolve on-node.
+#
+# The shared, stack-independent config (repos, gcc external, CPU target, the
+# GROMACS toggles) is in ../common.yaml. The SIMD choice is in ./simd.yaml,
+# generated per build from GROMACS_SIMD by scripts/lib.sh.
+spack:
+  view: true
+  include:
+  - ../common.yaml
+  - ./simd.yaml
+  packages:
+    all:
+      providers:
+        mpi: [cray-mpich]
+        fftw-api: [fftw]
+    # --- Cray MPI stack (PrgEnv-gnu) ---------------------------------------
+    # The system cray-mpich is HPE's MPICH fork tuned for Slingshot/CXI; it is
+    # the reference against which the from-source mpich of the "spack" stack is
+    # benchmarked. cray-mpich@9.1.0 is the gnu/12.3 build, which links against
+    # the same libstdc++ ABI as our gcc@14.3.0 (GROMACS is C++ only here, no
+    # Fortran modules involved, so the 12.3-vs-14.3 build directory name is
+    # cosmetic). Launch is via `srun` (Slurm MpiDefault=cray_shasta).
+    cray-mpich:
+      buildable: false
+      externals:
+      - spec: cray-mpich@9.1.0
+        prefix: /opt/cray/pe/mpich/9.1.0/ofi/gnu/12.3
+        # cray-mpich is external, so Spack prunes its libfabric/cray-pmi deps
+        # from the DAG. libmpi_gnu.so NEEDs libfabric.so.1, libpmi/libpmi2
+        # (/opt/cray/pe/lib64) and libpals (/opt/cray/pals), so put those dirs
+        # on the link (LIBRARY_PATH) and run (LD_LIBRARY_PATH) search paths —
+        # otherwise GROMACS fails to link ("libfabric.so.1 ... not found").
+        extra_attributes:
+          environment:
+            prepend_path:
+              LIBRARY_PATH: /opt/cray/libfabric/2.3.1/lib64:/opt/cray/pe/lib64:/opt/cray/pals/1.8/lib
+              LD_LIBRARY_PATH: /opt/cray/libfabric/2.3.1/lib64:/opt/cray/pe/lib64:/opt/cray/pals/1.8/lib
+    # Declared so the system libs are known to Spack; cray-mpich links them and
+    # their dirs are injected via cray-mpich's environment above.
+    libfabric:
+      buildable: false
+      externals:
+      - spec: libfabric@2.3.1 fabrics=cxi
+        prefix: /opt/cray/libfabric/2.3.1
+        modules: [libfabric/2.3.1]
+    cray-pmi:
+      buildable: false
+      externals:
+      - spec: cray-pmi@6.1.15
+        prefix: /opt/cray/pe/pmi/6.1.15
+        modules: [cray-pmi/6.1.15]
+    # --- Cray FFTW ---------------------------------------------------------
+    # GROMACS' PME does 3D FFTs through the fftw3 single-precision API
+    # (libfftw3f); the Spack gromacs package passes -DGMX_FFT_LIBRARY=fftw3 and
+    # lets CMake find it from the compiler wrapper's -I/-L, which Spack derives
+    # from this external's prefix. /opt/cray/pe/fftw/3.3.10.7/arm_grace is HPE's
+    # Grace-tuned build (module brics/cray-fftw/3.3.10.7).
+    #
+    # ~mpi on purpose: GROMACS never uses FFTW's own MPI transforms (it does its
+    # own PME decomposition), and declaring +mpi would drag cray-mpich into
+    # fftw's DAG for nothing. The version is the upstream FFTW version (3.3.10)
+    # that HPE's 3.3.10.7 packaging corresponds to — Spack matches specs against
+    # the FFTW version, not HPE's package revision.
+    fftw:
+      buildable: false
+      externals:
+      - spec: fftw@3.3.10 precision=float,double +openmp ~mpi
+        prefix: /opt/cray/pe/fftw/3.3.10.7/arm_grace
+        modules: [brics/cray-fftw/3.3.10.7]
+  specs:
+  # Two binaries, deliberately (see README "What you actually get"):
+  #   ~mpi -> `gmx`      thread-MPI: single-node runs, and all the prep/analysis
+  #                      tools (grompp, editconf, energy, ...) without MPI init.
+  #   +mpi -> `gmx_mpi`  real MPI: multi-node runs under srun.
+  # They install to separate prefixes and their file names do not collide, so
+  # both land in one view.
+  - gromacs ~mpi
+  - gromacs +mpi

@@ -1,0 +1,60 @@
+# GROMACS environment — "spack" stack: build the dependency stack from source.
+# MPI is a from-source MPICH and FFTW is built by Spack. Selected by
+# GROMACS_STACK=spack; scripts/lib.sh loads NO Cray PE modules for this stack
+# (the gcc@14.3.0 external is the system /usr/bin/gcc-14, always present).
+#
+# This is the portability/comparison stack against the default cray one
+# (../cray/spack.yaml). It SHARES the install tree ($PREFIX/opt) with it, so the
+# MPI/FFT-independent subtree (openblas, hwloc, cmake, ...) is built once.
+#
+# Two system libraries are still declared external here, and neither is a
+# shortcut:
+#   libfabric  the Slingshot CXI provider is closed-source HPE hardware support
+#              that simply does not exist in a from-source libfabric. Without it
+#              a from-source MPICH cannot use the interconnect at all, and the
+#              multi-node half of the benchmark would be meaningless.
+#   slurm      MPICH's hydra links libslurm for nodelist parsing and needs
+#              Slurm's pmi2.h to speak PMI2 to `srun --mpi=pmi2`. Building a
+#              second Slurm from source would not match the running one.
+# Everything genuinely comparable — the MPI implementation and the FFT library —
+# is from source.
+spack:
+  view: true
+  include:
+  - ../common.yaml
+  - ./simd.yaml
+  packages:
+    all:
+      providers:
+        mpi: [mpich]
+        fftw-api: [fftw]
+    # device=ch4 netmod=ofi + the system libfabric = the same transport path
+    # cray-mpich takes (CXI over Slingshot), so the comparison isolates the MPI
+    # implementation rather than the fabric. pmi=pmi2 +slurm makes
+    # `srun --mpi=pmi2` the launcher (Slurm's default cray_shasta PMI is for
+    # cray-mpich only — the modulefile exports the right launcher for each
+    # stack as GROMACS_MPI_LAUNCHER, so callers do not have to know this).
+    mpich:
+      require: ['device=ch4 netmod=ofi pmi=pmi2 +slurm +hydra +romio ~fortran']
+    libfabric:
+      buildable: false
+      externals:
+      - spec: libfabric@2.3.1 fabrics=cxi
+        prefix: /opt/cray/libfabric/2.3.1
+        modules: [libfabric/2.3.1]
+    slurm:
+      buildable: false
+      externals:
+      - spec: slurm@23.02.7
+        prefix: /usr
+    # From-source FFTW, pinned to the same upstream version the cray stack
+    # externalizes (HPE's 3.3.10.7 == upstream 3.3.10) so the two stacks differ
+    # in how FFTW was BUILT, not in which FFTW. precision=float is what GROMACS
+    # mixed precision actually calls; double is included so the same module can
+    # serve a +double GROMACS or other FFTW users later.
+    fftw:
+      require: ['@3.3.10 precision=float,double +openmp ~mpi']
+  specs:
+  # Same two binaries as the cray stack — see ../cray/spack.yaml.
+  - gromacs ~mpi
+  - gromacs +mpi

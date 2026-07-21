@@ -1,0 +1,6 @@
+[submodule "vendor/spack-packages"]
+	path = vendor/spack-packages
+	url = https://github.com/spack/spack-packages.git
+[submodule "vendor/spack"]
+	path = vendor/spack
+	url = https://github.com/spack/spack.git

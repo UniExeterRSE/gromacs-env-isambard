@@ -1,0 +1,36 @@
+# pixi-managed conda environment (pixi.lock IS tracked)
+/.pixi/
+
+# All build output lands OUTSIDE the repo under PREFIX (GROMACS_PREFIX; default
+# $PROJECTDIR/$USER/opt/<arch>, see scripts/common.sh) and the transient stage
+# under WORKING_DIR (GROMACS_WORKING_DIR). The rules below are a safety net only,
+# in case a repo-relative GROMACS_PREFIX ever writes state into the repo.
+/stage/
+/spack-env/*/.spack-env/
+/spack-env/*/spack.lock
+/spack-env/*/simd.yaml
+
+# sbatch stdout/results (#SBATCH --output=logs/...). The dir is tracked via
+# .gitkeep so a fresh clone has it; its contents are not.
+/logs/*
+!/logs/.gitkeep
+
+# Logs / batch output
+*.log
+*.out
+*.err
+*.tsv
+
+# OS process core dumps (`core`, `core.<pid>`). The kernel writes these to a
+# crashing process's working directory; they are not build artefacts. Anchored
+# to the repo root; safe to delete to reclaim space.
+/core
+/core.*
+
+# Python / OS cruft
+__pycache__/
+*.pyc
+*~
+*.swp
+*.swo
+.DS_Store

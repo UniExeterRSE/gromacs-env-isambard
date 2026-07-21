@@ -1,0 +1,71 @@
+[workspace]
+name = "gromacs-env-isambard"
+version = "0.1.0"
+description = "Pixi-driven, submodule-based reproducible Spack build of GROMACS 2026.1 for Isambard 3 (Grace/aarch64)."
+channels = ["conda-forge"]
+platforms = ["linux-aarch64"]
+
+[dependencies]
+# Pixi bootstraps Python. This Python RUNS Spack, so it must be < 3.12: Spack
+# 1.0 uses ast.Str, removed in Python 3.12. (Nothing in the GROMACS environment
+# itself needs this Python — it is purely the interpreter Spack runs under.)
+python = "3.11.*"
+
+# Auto-activate the built environment on every `pixi run` / `pixi shell`, in two
+# sourced steps:
+#   common.sh    puts the vendored `spack` on PATH + the generated modulefiles on
+#                MODULEPATH (so `pixi run spack ...` and `module load` both work).
+#   activate.sh  `module load`s the selected gromacs-env/<version>/<variant>.
+# Both are a NO-OP until a build has produced the modulefile, so this is safe
+# before the first build. Order matters: common.sh sets the MODULEPATH that
+# activate.sh relies on.
+#
+# This is a CONVENIENCE, not a requirement: pixi only matters for BUILDING. The
+# product is a self-contained Lmod modulefile, so the environment is used with
+# nothing but `module load` — see README "Use it".
+[activation]
+scripts = ["scripts/common.sh", "scripts/activate.sh"]
+
+[tasks]
+# One-time: clone the pinned Spack + spack-packages submodules. Both are public.
+submodule-init = "git submodule update --init --recursive --jobs 4"
+
+# Concretize ONLY — the dependency solve plus the variant assertions, then stop.
+# The cheap, login-node-safe check that a manifest change still solves (no
+# multi-hour install). Idempotent: a no-op when the lock already matches the
+# manifest; set FORCE_CONCRETIZE=1 to force a fresh re-solve. `build` and `fetch`
+# both run this same phase first (scripts/lib.sh).
+concretize = "bash scripts/concretize.sh"
+concretize-spack = "GROMACS_STACK=spack bash scripts/concretize.sh"
+
+# Login-node pre-fetch: download every from-source package into
+# $BASE/source-cache so the compute-node build runs offline. Concurrency capped
+# (FETCH_JOBS, default 4) for the login node's small `ulimit -u`.
+fetch = "bash scripts/fetch.sh"
+fetch-spack = "GROMACS_STACK=spack bash scripts/fetch.sh"
+
+# Build one variant. Run on a COMPUTE node (see scripts/build.sbatch); ~40-70 min
+# for the first variant, much less for the others (they share the install tree).
+# Build them one at a time — concurrent Spack installs race on the database lock.
+# The convenience tasks below just set the two axis variables; equivalently
+# prefix any task, e.g. `GROMACS_SIMD=neon pixi run build`.
+build = "bash scripts/build.sh"
+build-spack = "GROMACS_STACK=spack bash scripts/build.sh"
+build-neon = "GROMACS_SIMD=neon bash scripts/build.sh"
+
+# Regenerate just the Lmod modulefile from an already-installed environment (for
+# a modulefile fix, without a rebuild). For the cray variant, run it with the
+# Cray PE modules loaded.
+modulefile = "bash scripts/gen-modulefile.sh"
+
+# Bump the ENVIRONMENT version (CalVer in ./VERSION) so the next build lands in a
+# fresh prefix + module instead of overwriting the current install. No arg ->
+# today's date. Commit ./VERSION afterwards.
+bump-env-version = "bash scripts/bump-env-version.sh"
+
+# Report how the loaded variant was actually built (gmx -version).
+versions = "bash scripts/print-versions.sh"
+
+# The tests. Both submit to Slurm; see tests/README.md for what they cost.
+smoke = "sbatch tests/smoke.sbatch"
+benchmark = "sbatch tests/benchmark.sbatch"
