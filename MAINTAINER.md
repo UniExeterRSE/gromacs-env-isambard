@@ -114,6 +114,29 @@ too: `24×6`, `36×4`, `72×2` ranks×threads per node. All keep
 `ranks_per_node × OMP == 144` and use a threads-per-rank that divides 72, so no
 rank straddles a NUMA domain. See README "Multiple nodes".
 
+## Two Spack traps this repo works around
+
+Both cost real build time to discover; neither is obvious from the outside.
+
+**1. `spack concretize --fresh` ignores `packages:` changes.** It re-solves when
+the manifest's `specs:` change, but a change to the *configuration* — a new
+external, a different prefix, a dropped `modules:` key — is reported as
+`No new specs to concretize` and the stale lock is reused. The build then runs
+against configuration nobody wrote. So `gmx_concretize` hashes the three files
+that actually define the solve (`spack.yaml`, `simd.yaml`, `common.yaml`), stores
+the hash next to the lock, and forces `-f --fresh` whenever it moves. If you edit
+a manifest and the solve looks suspiciously unchanged, that guard is what should
+have caught it — check `$SPACK_ENV_DIR/.config-hash`.
+
+**2. `modules:` on an external can break the install.** Spack honours it by
+running `module load` in its *own* build subshell, which does not inherit the
+job's `MODULEPATH`. For a site module tree — `/tools/brics` here — that fails the
+install outright with `Module 'brics/cray-fftw/3.3.10.7' could not be loaded`.
+None of the externals in this repo carry a `modules:` key: the `prefix:` is all
+Spack needs to put the right `-I`/`-L` on the compiler wrapper, and `lib.sh`
+loads the module in the *build shell* separately, which is where
+`CRAY_LD_LIBRARY_PATH` needs to exist for `gen-modulefile.sh`.
+
 ## The two stacks
 
 | | `cray` (default) | `spack` |

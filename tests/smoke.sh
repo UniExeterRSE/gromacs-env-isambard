@@ -97,38 +97,33 @@ ok "$LAUNCHER placed $RANKS ranks across $hosts nodes"
 # --- 5 + 6. Run it ----------------------------------------------------------
 export OMP_NUM_THREADS="$OMP"
 
+# The physics comparison uses ZERO-step runs on both sides. `gmx energy` reports
+# the AVERAGE over the frames in the .edr, so comparing a 0-step reference
+# against a 2000-step run would compare a single-point energy with a trajectory
+# average — a meaningless test that would fail for entirely correct builds. With
+# nsteps=0 both sides hold exactly one frame: the same initial configuration,
+# evaluated independently.
 info "Single-rank thread-MPI reference (gmx, 0 steps) — the physics baseline"
 mkdir -p ref && cd ref
 gmx mdrun -s "$TPR" -nsteps 0 -ntmpi 1 -ntomp "$OMP" -noconfout -g ref.log -e ref.edr \
   > ref.out 2>&1 || { tail -40 ref.out ref.log 2>/dev/null; die "reference gmx mdrun failed"; }
-ref_pot="$(echo Potential | gmx energy -f ref.edr -o ref.xvg 2>/dev/null | grep -E '^Potential' | awk '{print $2}')"
+ref_pot="$(echo Potential | gmx energy -f ref.edr -o ref.xvg 2>&1 | grep -E '^Potential' | awk '{print $2}')"
 [ -n "$ref_pot" ] || die "could not extract the reference potential energy"
 ok "reference potential energy = $ref_pot kJ/mol (1 rank, thread-MPI)"
 cd "$WORK"
 
-info "Multi-node MPI run: $RANKS ranks x $OMP threads over $NODES nodes"
-mkdir -p mpi && cd mpi
-# -pin on: Slurm has already restricted each rank to its own $OMP cores
-# (--cpu-bind=cores); -pin on makes GROMACS pin its threads WITHIN that mask
-# rather than leaving them to migrate. -resetstep discards the startup and
-# load-balancing warmup from the timing.
+info "Multi-node single-point energy: $RANKS ranks over $NODES nodes"
+mkdir -p mpi0 && cd mpi0
 # shellcheck disable=SC2086
 $LAUNCHER -N "$NODES" -n "$RANKS" -c "$OMP" --cpu-bind=cores \
-  gmx_mpi mdrun -s "$TPR" -nsteps 2000 -resetstep 500 -ntomp "$OMP" -pin on \
-                -noconfout -g mpi.log -e mpi.edr \
-  > mpi.out 2>&1 || { tail -60 mpi.out mpi.log 2>/dev/null; die "multi-node gmx_mpi mdrun failed"; }
-
-grep -q "Finished mdrun" mpi.log || { tail -40 mpi.log; die "mdrun did not finish cleanly"; }
-# GROMACS states its parallel geometry in the log; assert it matches what we asked
-# for, so a silently-serialized run cannot pass.
-grep -qE "Using +$RANKS MPI process" mpi.log \
-  || { grep -iE "MPI process|OpenMP thread" mpi.log | head; die "mdrun did not use $RANKS MPI ranks"; }
-ok "mdrun used $RANKS MPI ranks x $OMP OpenMP threads"
-
-mpi_pot="$(echo Potential | gmx energy -f mpi.edr -o mpi.xvg 2>/dev/null | grep -E '^Potential' | awk '{print $2}')"
+  gmx_mpi mdrun -s "$TPR" -nsteps 0 -ntomp "$OMP" -pin on \
+                -noconfout -g mpi0.log -e mpi0.edr \
+  > mpi0.out 2>&1 || { tail -60 mpi0.out mpi0.log 2>/dev/null; die "multi-node 0-step gmx_mpi mdrun failed"; }
+mpi_pot="$(echo Potential | gmx energy -f mpi0.edr -o mpi0.xvg 2>&1 | grep -E '^Potential' | awk '{print $2}')"
 [ -n "$mpi_pot" ] || die "could not extract the MPI run's potential energy"
+cd "$WORK"
 
-# The two runs start from the same tpr, so their step-0 energies must agree.
+# Both sides evaluated the same initial configuration, so the energies must agree.
 # They are not bit-identical: domain decomposition changes the order of the
 # floating-point summation. 1e-4 relative is far tighter than that reordering
 # noise and far looser than a real error (a wrong cutoff, a broken halo exchange
@@ -138,8 +133,29 @@ awk -v d="$rel" 'BEGIN{exit !(d < 1e-4)}' \
   || die "potential energy disagrees with the single-rank reference: ref=$ref_pot mpi=$mpi_pot (relative $rel)"
 ok "potential energy matches the reference: $mpi_pot vs $ref_pot (relative difference $rel)"
 
+# --- 6. A real (short) MD run actually completes on both nodes ---------------
+info "Multi-node MD run: $RANKS ranks x $OMP threads over $NODES nodes"
+mkdir -p mpi && cd mpi
+# -pin on: Slurm has already restricted each rank to its own $OMP cores
+# (--cpu-bind=cores); -pin on makes GROMACS pin its threads WITHIN that mask
+# rather than leaving them to migrate. -resetstep discards startup and
+# load-balancing warmup from the timing.
+# shellcheck disable=SC2086
+$LAUNCHER -N "$NODES" -n "$RANKS" -c "$OMP" --cpu-bind=cores \
+  gmx_mpi mdrun -s "$TPR" -nsteps 2000 -resetstep 500 -ntomp "$OMP" -pin on \
+                -noconfout -g mpi.log -e mpi.edr \
+  > mpi.out 2>&1 || { tail -60 mpi.out mpi.log 2>/dev/null; die "multi-node gmx_mpi mdrun failed"; }
+
+grep -q "Finished mdrun" mpi.log || { tail -40 mpi.log; die "mdrun did not finish cleanly"; }
+# GROMACS states its parallel geometry in its own log; assert it matches what we
+# asked for, so a silently-serialized run cannot pass.
+grep -qE "Using +$RANKS MPI process" mpi.log \
+  || { grep -iE "MPI process|OpenMP thread" mpi.log | head; die "mdrun did not use $RANKS MPI ranks"; }
+ok "mdrun used $RANKS MPI ranks x $OMP OpenMP threads"
+
 perf="$(grep -E "^Performance:" mpi.log | awk '{print $2}')"
 info "Performance on $NODES nodes: ${perf:-?} ns/day"
+cd "$WORK"
 
 echo ""
 echo "SMOKE_OK — variant=$VARIANT nodes=$NODES ranks=$RANKS perf=${perf:-?} ns/day"

@@ -46,13 +46,11 @@ spack:
       externals:
       - spec: libfabric@2.3.1 fabrics=cxi
         prefix: /opt/cray/libfabric/2.3.1
-        modules: [libfabric/2.3.1]
     cray-pmi:
       buildable: false
       externals:
       - spec: cray-pmi@6.1.15
         prefix: /opt/cray/pe/pmi/6.1.15
-        modules: [cray-pmi/6.1.15]
     # --- Cray FFTW ---------------------------------------------------------
     # GROMACS' PME does 3D FFTs through the fftw3 single-precision API
     # (libfftw3f); the Spack gromacs package passes -DGMX_FFT_LIBRARY=fftw3 and
@@ -70,7 +68,13 @@ spack:
       externals:
       - spec: fftw@3.3.10 precision=float,double +openmp ~mpi
         prefix: /opt/cray/pe/fftw/3.3.10.7/arm_grace
-        modules: [brics/cray-fftw/3.3.10.7]
+        # No `modules:` key on purpose. Spack would then run `module load` in its
+        # own build subshell, which does not inherit this job's MODULEPATH — and
+        # for a site module tree like /tools/brics that fails the install with
+        # "Module ... could not be loaded". The prefix is all Spack needs to put
+        # the right -I/-L on the compiler wrapper; scripts/lib.sh separately
+        # loads the module in the build shell so CRAY_LD_LIBRARY_PATH is
+        # populated for gen-modulefile.sh.
   specs:
   # Two binaries, deliberately (see README "What you actually get"):
   #   ~mpi -> `gmx`      thread-MPI: single-node runs, and all the prep/analysis

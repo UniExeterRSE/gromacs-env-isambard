@@ -239,11 +239,32 @@ gmx_prepare() {
 # Idempotent: plain `--fresh` is a no-op (~1s) when the lock already matches the
 # manifest, and re-solves when the manifest changed. FORCE_CONCRETIZE=1 forces a
 # full re-solve.
+#
+# `spack concretize --fresh` alone is NOT enough, and this bit us: it re-solves
+# when the manifest's `specs:` change, but treats a change to the `packages:`
+# config — a new external, a different prefix, a dropped `modules:` key — as "no
+# new specs to concretize" and silently reuses the stale lock. The build then
+# fails (or worse, succeeds) against configuration nobody wrote. So hash the
+# three files that define the solve and force a full re-solve whenever that hash
+# moves.
 gmx_concretize() {
+  local stamp="$SPACK_ENV_DIR/.config-hash"
+  local now prev="" cflags=(--fresh)
+  now="$(cat "$SPACK_ENV_DIR/spack.yaml" "$SPACK_ENV_DIR/simd.yaml" \
+             "$REPO_ROOT/spack-env/common.yaml" 2>/dev/null | cksum | awk '{print $1"-"$2}')"
+  [ -r "$stamp" ] && prev="$(cat "$stamp")"
+
+  if [ "${FORCE_CONCRETIZE:-0}" = "1" ]; then
+    info "FORCE_CONCRETIZE=1 — forcing a full re-solve"
+    cflags=(-f --fresh)
+  elif [ -n "$prev" ] && [ "$now" != "$prev" ]; then
+    info "manifest/config changed since the last solve — forcing a full re-solve"
+    cflags=(-f --fresh)
+  fi
+
   info "Concretizing $ENV_NAME"
-  local cflags=(--fresh)
-  [ "${FORCE_CONCRETIZE:-0}" = "1" ] && cflags=(-f --fresh)
   spack -e "$SPACK_ENV_DIR" concretize "${cflags[@]}" || die "concretize failed"
+  printf '%s\n' "$now" > "$stamp"
   gmx_assert_variant
 }
 
