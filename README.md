@@ -25,19 +25,26 @@ version and build configuration otherwise.
 ### Why a module, and not "just a binary"
 
 The binaries are **dynamically linked**, and a fully static `gmx` is not
-achievable here — cray-mpich and libfabric ship as shared objects only. What the
-module buys you differs by variant, and the build records the evidence in its own
-log (`gmx_report_linkage`):
+achievable on the `cray` variant — cray-mpich and libfabric ship as shared
+objects only. Spack **RPATHs everything it built itself** into the binary, so
+those dependencies resolve with no environment at all; the **system externals**
+do not. Every build runs `ldd` with `LD_LIBRARY_PATH` stripped and records the
+result in its own log (`gmx_report_linkage`), so this is measured, not asserted.
+As built here:
 
-- Spack **RPATHs its own** packages (openblas, hwloc, the from-source fftw/mpich)
-  into the binary, so those resolve with no environment at all.
-- The **system externals** — cray-mpich, cray-fftw, libfabric — are *not*
-  RPATH'd. On the `cray` variant `gmx_mpi` will not start without the
-  `LD_LIBRARY_PATH` the module sets.
+| Variant | Unresolved without the module | Meaning |
+|---|---|---|
+| `cray-*` | `libfabric.so.1 => not found` | `gmx_mpi` **will not start** without the module's `LD_LIBRARY_PATH` |
+| `spack-*` | *(none)* | the binaries are **fully self-contained via RPATH** — only `PATH` is needed |
 
-So `module load` is the delivery mechanism, exactly as in the LFRic environment.
-The modulefile carries absolute paths, so it keeps working even if this repo
+So `module load` is the delivery mechanism, exactly as in the LFRic environment:
+it is *required* on the `cray` variant and merely *convenient* on the `spack`
+one. The modulefile carries absolute paths, so it keeps working even if this repo
 moves or is deleted.
+
+If you specifically need a relocatable, hand-it-to-someone binary, the `spack`
+variant is already that — it is one system library short of static, and that one
+(`libfabric`) it does not need at all.
 
 ## Variants
 
