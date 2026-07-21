@@ -47,7 +47,9 @@ simd="$(gmx_mpi -version 2>&1 | grep -m1 'SIMD instructions:' | sed 's/.*: *//')
 info "SIMD=$simd  FFT=$fft  launcher=$LAUNCHER"
 
 MAXNODES="${SLURM_JOB_NUM_NODES:-1}"
-work="${LOCALDIR:-/tmp}/gromacs-bench-$variant-${SLURM_JOB_ID:-$$}"
+# Shared filesystem, not node-local: every rank reads the same tpr and chdirs
+# into the same run directory. See the note in tests/smoke.sh.
+work="${SCRATCH:-$HOME}/gromacs-tests/bench-$variant-${SLURM_JOB_ID:-$$}"
 mkdir -p "$work"
 
 # Geometries. 144 cores/node, so ranks_per_node * omp == 144 in every case.

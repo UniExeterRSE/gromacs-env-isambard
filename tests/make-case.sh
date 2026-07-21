@@ -99,13 +99,44 @@ MDP
 echo "== Solvating a ${box} nm cube from GROMACS' bundled spc216.gro"
 gmx solvate -cs spc216.gro -box "$box" "$box" "$box" -o conf.gro -p topol.top
 
-echo "== grompp"
-gmx grompp -f grompp.mdp -c conf.gro -p topol.top -o bench.tpr -maxwarn 1
+# --- Energy minimisation ----------------------------------------------------
+# NOT optional. `gmx solvate` fills the box by REPLICATING spc216.gro, and while
+# each copy is equilibrated the seams between copies are not: there are bad
+# contacts there. Starting 2 fs dynamics on that configuration blows up within
+# ~15 steps ("One or more water molecules can not be settled", then a PME domain
+# decomposition fatal error). A few hundred steps of steepest descent removes the
+# clashes and costs a few seconds.
+cat > minim.mdp <<'MDP'
+integrator               = steep
+emtol                    = 1000.0
+emstep                   = 0.01
+nsteps                   = 2000
+nstlist                  = 20
+cutoff-scheme            = Verlet
+rlist                    = 1.0
+coulombtype              = PME
+rcoulomb                 = 1.0
+fourierspacing           = 0.12
+vdwtype                  = cutoff
+rvdw                     = 1.0
+MDP
 
-# Atom count straight from the .gro header (line 2 is the atom count, by format).
+echo "== grompp (minimisation)"
+gmx grompp -f minim.mdp -c conf.gro -p topol.top -o em.tpr -maxwarn 1
+
+echo "== energy minimisation"
+# Modest thread-MPI geometry: this runs in the batch script's own step (not under
+# srun), so it must stay well inside whatever the batch node allocated.
+gmx mdrun -s em.tpr -deffnm em -ntmpi "${GMX_CASE_RANKS:-4}" -ntomp "${GMX_CASE_OMP:-6}"
+
+echo "== grompp (production)"
+gmx grompp -f grompp.mdp -c em.gro -p topol.top -o bench.tpr -maxwarn 1
+
+# Atom count straight from the minimised .gro header (line 2 is the atom count,
+# by format).
 # Deliberately NOT `gmx dump -s bench.tpr | grep -m1 natoms`: under `set -o
 # pipefail` that reports failure even on success, because `grep -m1` exits after
 # the first match and `gmx dump` then dies of SIGPIPE. Reading the file cannot
 # fail, and needs no second GROMACS invocation.
-natoms="$(sed -n '2p' conf.gro | tr -dc '0-9')"
+natoms="$(sed -n '2p' em.gro | tr -dc '0-9')"
 echo "CASE_OK  tpr=$PWD/bench.tpr  atoms=${natoms:-?}  nsteps=$nsteps"

@@ -49,7 +49,8 @@ echo "=== Generating the benchmark case (once, shared by every variant)"
 # Any built variant's `gmx` can write the tpr — a tpr is a portable binary and
 # GROMACS reads its own across builds of the same version. Use the first one
 # that is actually built.
-case_dir="${LOCALDIR:-/tmp}/gromacs-bench-case-${SLURM_JOB_ID:-$$}"
+# Shared filesystem: all 288 ranks across both nodes read this one tpr.
+case_dir="${SCRATCH:-$HOME}/gromacs-tests/case-${SLURM_JOB_ID:-$$}"
 built=""
 for v in $VARIANTS; do
   ( export GROMACS_STACK="${v%-*}" GROMACS_SIMD="${v##*-}"

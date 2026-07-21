@@ -33,7 +33,13 @@ NODES="${SLURM_JOB_NUM_NODES:-1}"
 RANKS_PER_NODE="${SLURM_NTASKS_PER_NODE:-24}"
 OMP="${SLURM_CPUS_PER_TASK:-6}"
 RANKS=$((NODES * RANKS_PER_NODE))
-WORK="${GROMACS_TEST_DIR:-${LOCALDIR:-/tmp}/gromacs-smoke-$VARIANT-${SLURM_JOB_ID}}"
+# MUST be on a SHARED filesystem, not node-local $LOCALDIR. Every rank reads the
+# same .tpr and writes into the same working directory, so a per-node disk gives
+# the ranks on the second node nothing to read and nowhere to chdir to — and srun
+# reports that as a bare task-launch failure with no GROMACS output at all.
+# (Node-local disk is right for the Spack BUILD stage, which is single-node; it
+# is wrong for anything an MPI job touches.)
+WORK="${GROMACS_TEST_DIR:-${SCRATCH:-$HOME}/gromacs-tests/smoke-$VARIANT-${SLURM_JOB_ID}}"
 
 echo "=== GROMACS smoke test: variant=$VARIANT"
 echo "    nodes=$NODES ranks=$RANKS ranks/node=$RANKS_PER_NODE omp=$OMP"
@@ -90,7 +96,9 @@ TPR="$WORK/case/bench.tpr"
 # --- 4. The ranks really span two nodes -------------------------------------
 # Checked separately from mdrun, because a PMI misconfiguration makes mdrun look
 # like it worked: each rank silently becomes its own MPI_COMM_WORLD of size 1.
-hosts="$($LAUNCHER -N "$NODES" -n "$RANKS" hostname 2>/dev/null | sort -u | wc -l)"
+# stderr is NOT discarded here: srun's own complaints (a missing working
+# directory, a PMI mismatch) are exactly what this check exists to surface.
+hosts="$($LAUNCHER -N "$NODES" -n "$RANKS" hostname | sort -u | wc -l)"
 [ "$hosts" -eq "$NODES" ] || die "launcher placed ranks on $hosts distinct hosts, expected $NODES"
 ok "$LAUNCHER placed $RANKS ranks across $hosts nodes"
 
@@ -118,7 +126,9 @@ mkdir -p mpi0 && cd mpi0
 $LAUNCHER -N "$NODES" -n "$RANKS" -c "$OMP" --cpu-bind=cores \
   gmx_mpi mdrun -s "$TPR" -nsteps 0 -ntomp "$OMP" -pin on \
                 -noconfout -g mpi0.log -e mpi0.edr \
-  > mpi0.out 2>&1 || { tail -60 mpi0.out mpi0.log 2>/dev/null; die "multi-node 0-step gmx_mpi mdrun failed"; }
+  > mpi0.out 2>&1 || { rc=$?; echo "--- mpi0.out ---"; cat mpi0.out 2>/dev/null
+      echo "--- mpi0.log ---"; cat mpi0.log 2>/dev/null
+      die "multi-node 0-step gmx_mpi mdrun failed (exit $rc)"; }
 mpi_pot="$(echo Potential | gmx energy -f mpi0.edr -o mpi0.xvg 2>&1 | grep -E '^Potential' | awk '{print $2}')"
 [ -n "$mpi_pot" ] || die "could not extract the MPI run's potential energy"
 cd "$WORK"
@@ -138,13 +148,20 @@ info "Multi-node MD run: $RANKS ranks x $OMP threads over $NODES nodes"
 mkdir -p mpi && cd mpi
 # -pin on: Slurm has already restricted each rank to its own $OMP cores
 # (--cpu-bind=cores); -pin on makes GROMACS pin its threads WITHIN that mask
-# rather than leaving them to migrate. -resetstep discards startup and
-# load-balancing warmup from the timing.
+# rather than leaving them to migrate.
+#
+# No -resetstep here, deliberately. This run exists to prove mdrun completes, not
+# to time it — and resetting the counters early is a hard error: GROMACS aborts
+# with "PME tuning was still active when attempting to reset mdrun counters" if
+# the reset lands before its PME/cutoff auto-tuning has settled, which on a
+# 2000-step run it does. The benchmark, which runs 10x longer, resets at 20%.
 # shellcheck disable=SC2086
 $LAUNCHER -N "$NODES" -n "$RANKS" -c "$OMP" --cpu-bind=cores \
-  gmx_mpi mdrun -s "$TPR" -nsteps 2000 -resetstep 500 -ntomp "$OMP" -pin on \
+  gmx_mpi mdrun -s "$TPR" -nsteps 2000 -ntomp "$OMP" -pin on \
                 -noconfout -g mpi.log -e mpi.edr \
-  > mpi.out 2>&1 || { tail -60 mpi.out mpi.log 2>/dev/null; die "multi-node gmx_mpi mdrun failed"; }
+  > mpi.out 2>&1 || { rc=$?; echo "--- mpi.out ---"; cat mpi.out 2>/dev/null
+      echo "--- mpi.log ---"; cat mpi.log 2>/dev/null
+      die "multi-node gmx_mpi mdrun failed (exit $rc)"; }
 
 grep -q "Finished mdrun" mpi.log || { tail -40 mpi.log; die "mdrun did not finish cleanly"; }
 # GROMACS states its parallel geometry in its own log; assert it matches what we
