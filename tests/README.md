@@ -52,8 +52,8 @@ In order, each one a failure mode that a real Spack HPC build has produced:
    failed build.
 3. **`gmx` finds its own data** — `make-case.sh` needs `share/gromacs/top`, which
    GROMACS locates by resolving its own `argv[0]`. This is the check that the
-   modulefile's `PATH` ordering (real install prefixes ahead of the shared view)
-   is right.
+   modulefile's `PATH` composition (each binary reached through its own install
+   prefix, since there is no merged Spack view) is right.
 4. **The ranks really span two nodes** — checked *separately* from `mdrun`, with
    a bare `hostname`, because a wrong PMI plugin does not error: every rank
    silently becomes its own `MPI_COMM_WORLD` of size 1 and you get N independent

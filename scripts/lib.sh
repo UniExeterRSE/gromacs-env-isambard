@@ -6,7 +6,7 @@
 # and concretization (the dependency SOLVE) is not hidden inside the installer:
 #
 #   concretize.sh : gmx_prepare + gmx_concretize               (cheap solve/check)
-#   build.sh      : + gmx_install + view/modulefile/verify      (the full build)
+#   build.sh      : + gmx_install + modulefile + verification    (the full build)
 #   fetch.sh      : + gmx_fetch (after a login-node submodule clone)
 #
 # Deeper rationale (stacks, SIMD, the modulefile, tuning) lives in MAINTAINER.md.
@@ -168,7 +168,7 @@ EOF
 # Instantiate the directory environment under PREFIX from the tracked template,
 # rewriting the relative `include: ../common.yaml` to an absolute path back into
 # the repo (done literally in awk via index()/substr so nothing in the path is
-# interpreted). The env's view + lockfile then land outside the repo.
+# interpreted). The env's lockfile then lands outside the repo.
 #
 # ./simd.yaml is left relative: it is GENERATED next to the manifest by
 # gmx_write_simd_config, and Spack resolves an include relative to the including
@@ -314,13 +314,6 @@ gmx_install() {
   spack -e "$SPACK_ENV_DIR" install -j "$SPACK_JOBS" || die "install failed"
 }
 
-gmx_regenerate_view() {
-  if ! spack -e "$SPACK_ENV_DIR" env view regenerate; then
-    rm -rf "$SPACK_ENV_DIR/.spack-env/._view"
-    spack -e "$SPACK_ENV_DIR" env view regenerate || die "view regenerate failed"
-  fi
-}
-
 gmx_gen_modulefile() {
   bash "$GMX_SCRIPTS_DIR/gen-modulefile.sh" || die "gen-modulefile.sh failed"
 }
@@ -360,10 +353,22 @@ gmx_verify_build() {
       echo "$out" | grep -q -- "-msve-vector-bits=128" \
         || die "$bin was not compiled with -msve-vector-bits=128 (Grace SVE is 128-bit). Flags: $(echo "$out" | grep 'C++ compiler flags')"
     fi
-    # The Spack target pin (common.yaml: target=neoverse_v2) reaching the compiler.
-    echo "$out" | grep -q -- "-mcpu=neoverse-v2" \
-      || warn "$bin compiler flags do not mention -mcpu=neoverse-v2 — the target pin may not have reached the compiler wrapper"
   done
+
+  # The Spack target pin (common.yaml: `target=neoverse_v2`) reaching the
+  # compiler. Deliberately NOT checked against `gmx -version`: that reports
+  # CMAKE_CXX_FLAGS only, and Spack does not put the target flag there. Spack's
+  # compiler wrapper `preextend`s $SPACK_TARGET_ARGS_CXX onto every compile
+  # invocation instead, so the recorded per-install build environment is the
+  # real evidence.
+  local envfile spec
+  for spec in 'gromacs~mpi' 'gromacs+mpi'; do
+    envfile="$(spack -e "$SPACK_ENV_DIR" location -i "$spec" 2>/dev/null)/.spack/spack-build-env.txt"
+    [ -r "$envfile" ] || { warn "no recorded build env at $envfile — cannot verify the CPU target pin"; continue; }
+    grep -q "SPACK_TARGET_ARGS_CXX=-mcpu=neoverse-v2" "$envfile" \
+      || die "the target pin did not reach the compiler wrapper in $envfile (expected SPACK_TARGET_ARGS_CXX=-mcpu=neoverse-v2)"
+  done
+  info "CPU target: -mcpu=neoverse-v2 injected by the compiler wrapper — OK"
 
   # MPI vs thread-MPI must be the right way round for each binary.
   gmx -version 2>&1 | grep -q "MPI library:.*thread_mpi" \

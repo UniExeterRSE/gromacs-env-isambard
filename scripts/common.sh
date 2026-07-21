@@ -48,7 +48,7 @@ export GROMACS_ENV_VERSION
 # BASE (GROMACS_PREFIX)  the per-arch container, SHARED across env versions.
 #   Lives OUTSIDE the repo. Default $PROJECTDIR/$USER/opt/<sysname>-<machine>.
 # PREFIX                 the VERSIONED install: $BASE/$GROMACS_ENV_VERSION. Holds
-#   the Spack install tree (opt), the per-variant environment + view, and the
+#   the Spack install tree (opt), the per-variant environment, and the
 #   per-version Spack config. ALL variants share this one PREFIX/opt, so the
 #   MPI/FFT-independent subtree is built once.
 # WORKING_DIR (GROMACS_WORKING_DIR)  transient Spack build/compile stage ONLY. It
@@ -84,8 +84,8 @@ export GROMACS_MISC_CACHE="${GROMACS_MISC_CACHE:-$BASE/misc-cache}"
 export GROMACS_STACK="${GROMACS_STACK:-cray}"
 export GROMACS_SIMD="${GROMACS_SIMD:-sve}"
 export VARIANT="$GROMACS_STACK-$GROMACS_SIMD"
-# The Spack directory environment is GENERATED under PREFIX (so its view +
-# lockfile land outside the repo). The tracked spack-env/<stack>/spack.yaml is
+# The Spack directory environment is GENERATED under PREFIX (so its lockfile
+# lands outside the repo). The tracked spack-env/<stack>/spack.yaml is
 # the TEMPLATE lib.sh instantiates from. See MAINTAINER.md.
 export SPACK_ENV_TEMPLATE="$REPO_ROOT/spack-env/$GROMACS_STACK/spack.yaml"
 export SPACK_ENV_DIR="$PREFIX/spack-env/$VARIANT"

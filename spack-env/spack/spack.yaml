@@ -19,7 +19,21 @@
 # Everything genuinely comparable — the MPI implementation and the FFT library —
 # is from source.
 spack:
-  view: true
+  # view: false, deliberately. A Spack view is a merged symlink tree, and it
+  # cannot hold BOTH gromacs specs: `gromacs~mpi` and `gromacs+mpi` differ only
+  # by a variant, so Spack projects them to the same prefix and refuses to build
+  # the view ("the following two specs project to the same prefix").
+  #
+  # Custom projections would separate them but then there is no merged bin/ to
+  # put on PATH, which was the only reason to want a view. So there is no view:
+  # the modulefile composes PATH/LD_LIBRARY_PATH/CMAKE_PREFIX_PATH from the two
+  # GROMACS install prefixes directly (scripts/gromacs-env.lua). That is also
+  # strictly more correct — each binary is invoked through its own prefix, so
+  # GROMACS resolves its own share/gromacs data dir unambiguously, and
+  # CMAKE_PREFIX_PATH/pkgconfig point at real GROMACS installs rather than a
+  # merged tree. Everything else in the environment is a dependency that Spack
+  # has already RPATH'd into the binaries.
+  view: false
   include:
   - ../common.yaml
   - ./simd.yaml

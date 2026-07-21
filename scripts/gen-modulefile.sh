@@ -10,7 +10,7 @@
 #     assert(loadfile(".../gromacs-env.lua"))(data)
 # (Lmod's sandbox forbids dofile() but allows loadfile() + an argument.)
 #
-# Called by build.sh after `env view regenerate`, but also runnable on its own to
+# Called by build.sh after the install, but also runnable on its own to
 # regenerate the modulefile without a full rebuild (the env must already be
 # concretized + installed). For the cray variant, run with the Cray PE modules
 # loaded (PrgEnv-gnu + cray-fftw) so CRAY_LD_LIBRARY_PATH is populated.
@@ -28,9 +28,7 @@ case "$GROMACS_STACK" in cray|spack) ;; *) die "GROMACS_STACK must be 'cray' or 
 case "$GROMACS_SIMD"  in sve|neon)   ;; *) die "GROMACS_SIMD must be 'sve' or 'neon' (got '$GROMACS_SIMD')" ;; esac
 
 logic="$_here/gromacs-env.lua"
-view="$SPACK_ENV_DIR/.spack-env/view"
 [ -f "$logic" ] || die "missing modulefile logic: $logic"
-[ -d "$view/bin" ] || die "Spack env view missing at $view — build it first: sbatch scripts/build.sbatch"
 command -v spack >/dev/null 2>&1 || die "spack CLI not on PATH (common.sh should add it)"
 
 # Snapshot the committed logic next to the generated modulefiles, under BASE, and
@@ -125,10 +123,9 @@ ${cray_loads}local data = {
   stack           = $(lua_q  "$GROMACS_STACK"),
   simd            = $(lua_q  "$GROMACS_SIMD"),
   gromacs_version = $(lua_qn "$gromacs_version"),
-  -- Absolute paths to the (under-PREFIX) Spack env + its view, so the modulefile
-  -- never derives them from the repo: the deliverable stays repo-independent.
+  -- Absolute, under-PREFIX paths, so the modulefile never derives anything from
+  -- the repo: the deliverable stays repo-independent even if the repo is deleted.
   spack_env       = $(lua_q  "$SPACK_ENV_DIR"),
-  view            = $(lua_q  "$view"),
   gromacs_tmpi    = $(lua_q  "$gromacs_tmpi"),
   gromacs_mpi     = $(lua_q  "$gromacs_mpi"),
   launcher        = $(lua_q  "$launcher"),

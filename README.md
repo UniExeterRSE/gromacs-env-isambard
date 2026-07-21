@@ -188,7 +188,7 @@ sbatch --export=ALL,GROMACS_SIMD=neon tests/smoke.sbatch     # cray-neon
 2 nodes for well under 20 minutes. A successful run ends with `SMOKE_OK`. It
 asserts, in order: the module puts both binaries on `PATH`; they report the SIMD
 / FFT / MPI they were *meant* to be built with (including `-msve-vector-bits=128`
-for the SVE builds); `gmx` can find its bundled data through the view; the
+for the SVE builds); `gmx` can find its bundled data; the
 launcher really spreads ranks over two distinct hosts; `mdrun` really used all 48
 ranks; and the potential energy agrees with a single-rank reference to better
 than 1e-4 relative — i.e. the domain decomposition and interconnect are not

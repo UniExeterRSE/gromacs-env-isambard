@@ -4,7 +4,7 @@
 # Produces `gmx` (thread-MPI) + `gmx_mpi` (MPI) and their Lmod modulefile under
 # PREFIX. The phases live in scripts/lib.sh; this driver just composes them:
 # prepare + concretize (the SOLVE — also standalone, scripts/concretize.sh) then
-# install + view + modulefile + verification. All heavy output goes under PREFIX
+# install + modulefile + verification. All heavy output goes under PREFIX
 # (outside the repo); re-runs are cheap (Spack skips already-built, content-
 # addressed packages). Run on a compute node — see scripts/build.sbatch.
 set -uo pipefail
@@ -18,7 +18,6 @@ _here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 gmx_prepare            # validate + python + submodules + modules + env + simd.yaml
 gmx_concretize         # the dependency solve + variant assertions
 gmx_install
-gmx_regenerate_view
 gmx_gen_modulefile
 gmx_verify_build       # asserts SIMD / SVE width / target actually compiled in
 gmx_report_linkage     # records what the module's LD_LIBRARY_PATH is buying
