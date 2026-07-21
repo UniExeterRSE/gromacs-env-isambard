@@ -7,17 +7,21 @@
 # (../cray/spack.yaml). It SHARES the install tree ($PREFIX/opt) with it, so the
 # MPI/FFT-independent subtree (openblas, hwloc, cmake, ...) is built once.
 #
-# Two system libraries are still declared external here, and neither is a
-# shortcut:
+# ONE system library is still declared external here, and it is not a shortcut:
 #   libfabric  the Slingshot CXI provider is closed-source HPE hardware support
 #              that simply does not exist in a from-source libfabric. Without it
 #              a from-source MPICH cannot use the interconnect at all, and the
 #              multi-node half of the benchmark would be meaningless.
-#   pmix       the PMIx client must interoperate with the PMIx *server* inside
-#              the running slurmstepd (Slurm's mpi_pmix_v4 plugin, built against
-#              this system PMIx 4.2.6). A from-source PMIx would be a second,
-#              unrelated implementation of a wire protocol whose two ends have to
-#              agree, which is precisely the class of bug this replaced.
+#
+# PMIx is NOT external here, and that is a deliberate reversal. The system PMIx
+# (4.2.6) looks like the safe choice — it is what Slurm's mpi_pmix_v4 server
+# plugin is built against — but it cannot be linked against: its libtool archive
+# declares `dependency_libs = ... -levent_core -levent_pthreads`, and this system
+# has libevent's runtime .so.N but no -devel symlinks, so MPICH fails to link
+# with "cannot find -levent_core". Spack builds PMIx and its libevent instead.
+# Client/server version skew is fine by design here: cross-version
+# interoperability between a PMIx client and a PMIx server is an explicit
+# guarantee of the PMIx standard, which is the whole reason PMIx exists.
 # Everything genuinely comparable — the MPI implementation and the FFT library —
 # is from source.
 spack:
@@ -62,16 +66,23 @@ spack:
     # callers never have to know any of this.
     mpich:
       require: ['device=ch4 netmod=ofi pmi=pmix ~hydra +romio ~fortran']
+    # Pinned to 4.2.x, matching the PMIx generation Slurm's own mpi_pmix_v4
+    # server plugin is built against (4.2.6 here). Two reasons, both found the
+    # hard way:
+    #   - Spack's default (6.1.0 at this pin) aborts every MPI process at
+    #     startup with
+    #       hwloc_components_fini: Assertion `0 != hwloc_components_users' failed
+    #     against hwloc 2.13 — an unbalanced hwloc init/fini in a very new PMIx.
+    #   - client/server skew is supported by the PMIx standard, but there is no
+    #     reason to lean on it across four major versions when matching the
+    #     server costs nothing.
+    pmix:
+      require: ['@4.2.6']
     libfabric:
       buildable: false
       externals:
       - spec: libfabric@2.3.1 fabrics=cxi
         prefix: /opt/cray/libfabric/2.3.1
-    pmix:
-      buildable: false
-      externals:
-      - spec: pmix@4.2.6
-        prefix: /usr
     # From-source FFTW, pinned to the same upstream version the cray stack
     # externalizes (HPE's 3.3.10.7 == upstream 3.3.10) so the two stacks differ
     # in how FFTW was BUILT, not in which FFTW. precision=float is what GROMACS
