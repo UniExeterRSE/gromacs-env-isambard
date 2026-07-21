@@ -86,7 +86,7 @@ end
 
 -- --- How to launch ----------------------------------------------------------
 -- The two stacks need different Slurm PMI plugins: cray-mpich speaks Slurm's
--- default cray_shasta PMI, a from-source MPICH built pmi=pmi2 speaks PMI2. That
+-- default cray_shasta PMI, the from-source MPICH speaks PMIx. That
 -- is a property of THIS build, so the module states it rather than making every
 -- job script guess. tests/ and any user script should use it:
 --     $GROMACS_MPI_LAUNCHER -n 48 gmx_mpi mdrun ...

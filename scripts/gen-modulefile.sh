@@ -67,7 +67,7 @@ gromacs_version="$(spack -e "$SPACK_ENV_DIR" find --format '{version}' gromacs+m
 if [ "$GROMACS_STACK" = cray ]; then
   launcher="srun"                 # Slurm MpiDefault=cray_shasta, which is cray-mpich's
 else
-  launcher="srun --mpi=pmi2"      # from-source mpich built pmi=pmi2
+  launcher="srun --mpi=pmix"      # from-source mpich built pmi=pmix (see spack-env/spack/spack.yaml)
 fi
 
 # --- Cray PE prerequisites + runtime lib dirs (cray variant only) -----------

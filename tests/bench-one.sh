@@ -71,9 +71,26 @@ for nodes in $(seq 1 "$MAXNODES"); do
       mkdir -p "$d"
       export OMP_NUM_THREADS="$omp"
       # shellcheck disable=SC2086
+      # -notunepme is deliberate, and it is what makes this a COMPARISON rather
+      # than three unrelated measurements. GROMACS' PME auto-tuner rebalances the
+      # real-space/reciprocal-space split at runtime, so with it on each variant
+      # can end up doing a different amount of work — and the result depends on
+      # how the tuner happened to converge, which adds run-to-run variance on top.
+      # Fixing the balance makes every variant run the identical decomposition,
+      # so a difference in ns/day is a difference in the kernels, the FFT library
+      # or the MPI, which is the question being asked.
+      #
+      # It is also what makes -resetstep safe: GROMACS aborts outright ("PME
+      # tuning was still active when attempting to reset mdrun counters") if the
+      # reset lands mid-tuning, and on 2 nodes tuning ran past step 4000 of
+      # 20000. With tuning off there is nothing to collide with.
+      #
+      # NB for users reading this for run advice: leave tuning ON in production.
+      # It usually wins. It is disabled here only to make builds comparable.
       (cd "$d" && $LAUNCHER -N "$nodes" -n "$ranks" -c "$omp" --cpu-bind=cores \
           gmx_mpi mdrun -s "$tpr" -nsteps "$nsteps" -resetstep $((nsteps / 5)) \
-                        -ntomp "$omp" -pin on -noconfout -g md.log -e ener.edr \
+                        -notunepme -ntomp "$omp" -pin on -noconfout \
+                        -g md.log -e ener.edr \
           > run.out 2>&1)
       rc=$?
       perf="$(grep -E '^Performance:' "$d/md.log" 2>/dev/null | awk '{print $2}')"

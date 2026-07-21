@@ -13,9 +13,11 @@
 #              that simply does not exist in a from-source libfabric. Without it
 #              a from-source MPICH cannot use the interconnect at all, and the
 #              multi-node half of the benchmark would be meaningless.
-#   slurm      MPICH's hydra links libslurm for nodelist parsing and needs
-#              Slurm's pmi2.h to speak PMI2 to `srun --mpi=pmi2`. Building a
-#              second Slurm from source would not match the running one.
+#   pmix       the PMIx client must interoperate with the PMIx *server* inside
+#              the running slurmstepd (Slurm's mpi_pmix_v4 plugin, built against
+#              this system PMIx 4.2.6). A from-source PMIx would be a second,
+#              unrelated implementation of a wire protocol whose two ends have to
+#              agree, which is precisely the class of bug this replaced.
 # Everything genuinely comparable — the MPI implementation and the FFT library —
 # is from source.
 spack:
@@ -44,21 +46,31 @@ spack:
         fftw-api: [fftw]
     # device=ch4 netmod=ofi + the system libfabric = the same transport path
     # cray-mpich takes (CXI over Slingshot), so the comparison isolates the MPI
-    # implementation rather than the fabric. pmi=pmi2 +slurm makes
-    # `srun --mpi=pmi2` the launcher (Slurm's default cray_shasta PMI is for
-    # cray-mpich only — the modulefile exports the right launcher for each
-    # stack as GROMACS_MPI_LAUNCHER, so callers do not have to know this).
+    # implementation rather than the fabric.
+    #
+    # pmi=pmix, NOT pmi=pmi2. The obvious choice, `pmi=pmi2` with
+    # `srun --mpi=pmi2`, does not work here: MPICH 5's PMI2 client sends a
+    # `fullinit` without the `pmijobid` field that Slurm 23.02's mpi_pmi2 plugin
+    # requires, so every rank dies in MPI_Init_thread with
+    #   slurmstepd: error: pmijobid missing in fullinit command
+    #   pmi2_init(21): PMI_Init returned -1
+    # PMIx is the supported path on this Slurm (it ships mpi_pmix_v4.so), and
+    # `pmi=pmix` conflicts with +hydra in the Spack package, hence ~hydra: this
+    # MPICH has no `mpiexec` of its own and is launched only by srun. That is no
+    # loss here — srun is the launcher on this machine either way, and the
+    # modulefile exports the right one per stack as $GROMACS_MPI_LAUNCHER so
+    # callers never have to know any of this.
     mpich:
-      require: ['device=ch4 netmod=ofi pmi=pmi2 +slurm +hydra +romio ~fortran']
+      require: ['device=ch4 netmod=ofi pmi=pmix ~hydra +romio ~fortran']
     libfabric:
       buildable: false
       externals:
       - spec: libfabric@2.3.1 fabrics=cxi
         prefix: /opt/cray/libfabric/2.3.1
-    slurm:
+    pmix:
       buildable: false
       externals:
-      - spec: slurm@23.02.7
+      - spec: pmix@4.2.6
         prefix: /usr
     # From-source FFTW, pinned to the same upstream version the cray stack
     # externalizes (HPE's 3.3.10.7 == upstream 3.3.10) so the two stacks differ
