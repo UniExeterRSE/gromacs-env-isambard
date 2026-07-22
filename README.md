@@ -144,6 +144,8 @@ module avail gromacs-env                       # every built version x variant
 module load gromacs-env/v2026.07.21/cray-neon  # or .../spack-neon, .../cray-sve
 
 gmx -version          # the definitive record of how this build was configured
+# or
+gmx_mpi -version
 ```
 
 A bare `module load gromacs-env` resolves to the most-recently-built version's
