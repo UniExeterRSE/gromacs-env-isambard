@@ -85,7 +85,7 @@ heavy build runs on a compute node.
 
 ```bash
 # 1. Clone the repo and fetch the vendored Spack.
-git clone <repo-url> gromacs-env-isambard
+git clone https://github.com/UniExeterRSE/gromacs-env-isambard.git
 cd gromacs-env-isambard
 git submodule update --init --recursive --jobs 4
 
