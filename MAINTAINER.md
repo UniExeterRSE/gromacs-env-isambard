@@ -41,7 +41,7 @@ why `concretize.sh` exists as a cheap, login-node-safe solve check running
 
 ## Variants: two axes, one install tree
 
-`VARIANT = $GROMACS_STACK-$GROMACS_SIMD` — `cray|spack` × `sve|neon`. All four
+`VARIANT = $GROMACS_STACK-$GROMACS_SIMD` — `cray|spack` × `neon|sve`. All four
 combinations share `$PREFIX/opt`, so the MPI/FFT-independent subtree (cmake,
 openblas, hwloc, perl, …) is built once.
 
@@ -79,7 +79,7 @@ will tell you, and *then* is the time to pass an explicit length.
 | Toggle | Setting | Why |
 |---|---|---|
 | CPU target | `target=neoverse_v2` (`common.yaml`, `packages: all`) | The `-march=native`/`-mtune=native` equivalent. Spack's compiler wrapper turns it into `-mcpu=neoverse-v2`. Pinned rather than left native so the solve is identical wherever it runs. Asserted post-build. |
-| SIMD | `+sve` → `GMX_SIMD=ARM_SVE`, 128-bit | See the SIMD note below. |
+| SIMD | `~sve` → `GMX_SIMD=ARM_NEON_ASIMD` **(default)**; `+sve` → `ARM_SVE`, 128-bit | Measured, not assumed — see the SIMD question below. |
 | `+openmp` | on | Essential on a 144-core node: GROMACS wants a handful of OpenMP threads per rank, not one rank per core. |
 | `+hwloc` | on | Topology-aware pinning. Matters here — 2 NUMA domains per node, and GROMACS pins by default. |
 | `build_type` | `Release` | `-O3 -DNDEBUG`. |
@@ -191,9 +191,9 @@ loads the module in the *build shell* separately, which is where
 
 | | `cray` (default) | `spack` |
 |---|---|---|
-| MPI | system **cray-mpich** 9.1.0 (external) | **mpich** from source, `device=ch4 netmod=ofi pmi=pmi2 +slurm` |
+| MPI | system **cray-mpich** 9.1.0 (external) | **mpich** 5 from source, `device=ch4 netmod=ofi pmi=pmix ~hydra` |
 | FFT | system **cray-fftw** 3.3.10.7, `arm_grace` build (external) | **fftw** 3.3.10 from source |
-| Launcher | `srun` (Slurm `MpiDefault=cray_shasta`) | `srun --mpi=pmi2` |
+| Launcher | `srun` (Slurm `MpiDefault=cray_shasta`) | `srun --mpi=pmix` |
 
 The `spack` stack still declares **two** system externals, and neither is a
 shortcut:
@@ -202,12 +202,23 @@ shortcut:
   support that does not exist in a from-source libfabric. Without it a
   from-source MPICH cannot use the interconnect at all, and the multi-node half
   of the comparison would be meaningless.
-- **slurm** — MPICH's hydra links `libslurm` for nodelist parsing and needs
-  Slurm's `pmi2.h`. Building a second Slurm from source would not match the
-  running one.
+Everything genuinely comparable — the MPI implementation, the FFT library, and
+PMIx — is from source.
 
-Everything genuinely comparable — the MPI implementation, the FFT library — is
-from source.
+**The PMI path took two attempts, and both failures are worth knowing.** The
+obvious choice, `pmi=pmi2` + `srun --mpi=pmi2`, does not work: MPICH 5's PMI2
+client sends a `fullinit` without the `pmijobid` field Slurm 23.02's `mpi_pmi2`
+plugin requires, and every rank dies in `MPI_Init_thread` with
+`slurmstepd: error: pmijobid missing in fullinit command`. Moving to PMIx then
+hit two more walls in turn: the *system* PMIx cannot be linked (its libtool
+archive demands `-levent_core`, and this system ships libevent's runtime
+`.so.N` with no `-devel` symlinks), and Spack's *default* PMIx (6.1.0) aborts
+every process at startup against hwloc 2.13 with
+`hwloc_components_fini: Assertion '0 != hwloc_components_users' failed`. Hence
+from-source PMIx **pinned to 4.2.6** — the generation Slurm's own
+`mpi_pmix_v4.so` is built against. `pmi=pmix` also conflicts with `+hydra` in
+the Spack package, so this MPICH has no `mpiexec`; that costs nothing, because
+`srun` is the launcher here either way.
 
 The launcher difference is the one thing a user could get wrong, so the module
 states it rather than making job scripts guess: `$GROMACS_MPI_LAUNCHER`. Nothing
@@ -235,11 +246,13 @@ Two things must stay as they are:
    *statically scanning the top-level modulefile source* for `load(...)`, so a
    `load()` reachable only through `loadfile()` is invisible to that scan and
    silently does nothing.
-2. **The per-spec install prefixes go on `PATH` ahead of the view.** Both GROMACS
-   builds land in one view, but GROMACS finds its own `share/gromacs/top` by
-   resolving `argv[0]` back to an install prefix. Invoking each binary through
-   its real prefix keeps that unambiguous. `tests/smoke.sh` check 3 is the
-   regression test for this.
+2. **`PATH` is composed from the two install prefixes, and there is no Spack
+   view at all.** A view cannot hold both GROMACS specs — they differ only by a
+   variant, so Spack projects them to the same prefix and refuses. That turns
+   out to be the better arrangement anyway: GROMACS finds its own
+   `share/gromacs/top` by resolving `argv[0]` back to an install prefix, so
+   reaching each binary through its real prefix keeps that unambiguous.
+   `tests/smoke.sh` check 3 is the regression test for this.
 
 `gen-modulefile.sh` is runnable standalone, so a modulefile fix does not need a
 rebuild — but for the `cray` variant, run it with the Cray PE modules loaded so
