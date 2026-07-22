@@ -27,20 +27,23 @@ set -uo pipefail
 cd "${SLURM_SUBMIT_DIR:-$(pwd)}" || exit 1
 
 # ---- Configuration: everything this build needs, set explicitly -----------
-export GROMACS_STACK="${GROMACS_STACK:-cray}"   # cray | spack
-export GROMACS_SIMD="${GROMACS_SIMD:-neon}"     # neon | sve
+# GROMACS_STACK (cray|spack) and GROMACS_SIMD (neon|sve) are deliberately NOT
+# defaulted here — scripts/common.sh owns those defaults, and re-stating them in
+# every sbatch is how they drift. Override either via --export (see above).
 # BASE: the per-arch container, shared across env versions (Lustre; survives the
 # job). common.sh installs into the VERSIONED prefix $GROMACS_PREFIX/<version>,
 # with the version read from ./VERSION.
 export GROMACS_PREFIX="${GROMACS_PREFIX:-$PROJECTDIR/$USER/opt/$(uname -sm | tr ' ' -)}"
 # Transient Spack build stage; node-local NVMe (fast, off the contended Lustre).
 # $LOCALDIR is Isambard's per-node local disk; edit if your system differs.
-export GROMACS_WORKING_DIR="${GROMACS_WORKING_DIR:-$LOCALDIR/gromacs-build-$GROMACS_STACK-$GROMACS_SIMD}"
+# One stage dir for every variant: Spack keys its build stage by package hash, so
+# sharing it lets a rebuild reuse an unpacked source rather than re-extract it.
+# Variants are built one at a time anyway (they share the install tree's lock).
+export GROMACS_WORKING_DIR="${GROMACS_WORKING_DIR:-$LOCALDIR/gromacs-build}"
 export SPACK_JOBS="${SPACK_JOBS:-${SLURM_CPUS_PER_TASK:-32}}"
 # ---------------------------------------------------------------------------
 
 echo "host=$(hostname) jobid=${SLURM_JOB_ID:-?} cpus=${SLURM_CPUS_PER_TASK:-?}"
-echo "  variant=$GROMACS_STACK-$GROMACS_SIMD"
 echo "  GROMACS_ENV_VERSION=${GROMACS_ENV_VERSION:-$(cat VERSION 2>/dev/null || echo '?')}  (install -> \$GROMACS_PREFIX/<version>)"
 echo "  GROMACS_PREFIX(base)=$GROMACS_PREFIX"
 echo "  GROMACS_WORKING_DIR=$GROMACS_WORKING_DIR"
